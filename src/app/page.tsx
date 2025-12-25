@@ -1,65 +1,105 @@
-import Image from "next/image";
+'use client';
+
+import { useEffect } from 'react';
+
+import { useQuery } from '@tanstack/react-query';
+import { fetchLatestTelemetry } from '@/lib/api';
+import { DeviceCard } from '@/components/DeviceCard';
+import { Loader2 } from 'lucide-react';
 
 export default function Home() {
+  const { data: latestData, isLoading, isError, error } = useQuery({
+    queryKey: ['latestTelemetry'],
+    queryFn: fetchLatestTelemetry,
+    refetchInterval: 5000,
+  });
+
+
+
+  const FIXED_DEVICES = [
+    { deviceId: 'esp32-001', location: 'Lobby' },
+    { deviceId: 'esp32-002', location: 'Laboratory' },
+  ];
+
+  const devices = FIXED_DEVICES.map(fixed => {
+    // Case-insensitive match with trim
+    const live = latestData?.find(d => d.deviceId.toLowerCase().trim() === fixed.deviceId.toLowerCase().trim());
+
+    // Offline Logic: > 7 seconds from timestamp
+    let isOffline = true;
+    if (live && live.timestamp) {
+      const lastSeen = new Date(live.timestamp).getTime();
+      const now = Date.now();
+      const diff = now - lastSeen;
+      // If diff is less than 15000ms (15s), it is ONLINE.
+      // Relaxed from 7s to prevent flickering due to poll jitter or latency
+      if (diff < 15000) {
+        isOffline = false;
+      }
+    } else if (live) {
+      // If live exists but no timestamp? (API ensures it now), treat as fresh if just fetched?
+      // API sets it to 'now' if missing, so diff would be 0.
+      isOffline = false;
+    }
+
+    if (live && !isOffline) {
+      // Force the nice location name AND include status 'online'
+      return { ...live, location: fixed.location, status: 'online' };
+    }
+
+    // Fallback to offline state
+    // If we have stale live data, we might want to show it but greyed out?
+    // Requirement: "go offline... and there is not new one". Use offline style.
+    return {
+      ...fixed,
+      // If we have stale data, render it but marked offline? Or zero it out?
+      // Previous code zeroed it out. Let's keep it zeroed for clean "OFFLINE" look or 
+      // preserve last known values? "Pressure display... removed". 
+      // Let's stick to safe defaults for offline.
+      tempC: live ? live.tempC : 0,
+      pressureHpa: live ? live.pressureHpa : 0,
+      fw: live ? live.fw : 'Unknown',
+      timestamp: live ? live.timestamp : undefined,
+      status: 'offline',
+      alarmStatus: 'normal'
+    } as any;
+  });
+
+
+
   return (
-    <div className="flex min-h-screen items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex min-h-screen w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
+    <main className="min-h-screen bg-black p-8 md:p-16">
+      <div className="mx-auto max-w-[1600px]">
+        <header className="mb-16 flex items-end justify-between border-b border-neutral-800/50 pb-8">
+          <div>
+            <h1 className="text-6xl font-black tracking-tighter text-white mb-2 flex items-baseline">
+              MONITOR
+              <span className="text-neutral-600 ml-2">v0.1</span>
+            </h1>
+            <p className="text-neutral-400 font-mono text-xs tracking-[0.2em] uppercase">System Status Dashboard</p>
+          </div>
+          <div className="hidden md:block">
+            <div className="flex items-center space-x-2 px-3 py-1.5 bg-neutral-900/80 rounded-full text-[10px] text-neutral-400 font-bold border border-neutral-800 tracking-wider">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)] animate-pulse"></span>
+              <span>SYSTEM ONLINE</span>
+            </div>
+          </div>
+        </header>
+
+        {isError && (
+          <div className="mb-12 p-6 bg-red-950/20 border-l-4 border-red-900 text-red-700 font-mono">
+            ERR: {(error as Error).message}
+          </div>
+        )}
+
+        <div className="grid grid-cols-1 gap-8 md:grid-cols-2 lg:gap-12">
+          {devices.map((device) => (
+            <div key={device.deviceId} className="min-h-[400px]">
+              <DeviceCard device={device} />
+            </div>
+          ))}
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
-    </div>
+      </div>
+    </main>
   );
 }

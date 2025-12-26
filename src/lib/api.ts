@@ -39,7 +39,9 @@ export const uploadFirmware = async (deviceId: string, file: File) => {
     formData.append('file', file);
     formData.append('deviceId', deviceId);
 
-    const response = await api.post(`/api/firmware/${deviceId}`, formData, {
+    // Use axios directly to hit the Next.js API route (relative path)
+    // instead of the external API_BASE_URL (port 3000)
+    const response = await axios.post(`/api/firmware/${deviceId}`, formData, {
         headers: {
             'Content-Type': 'multipart/form-data',
         },

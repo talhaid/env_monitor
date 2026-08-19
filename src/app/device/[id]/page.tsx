@@ -2,15 +2,21 @@
 
 import { useQuery } from '@tanstack/react-query';
 import { useParams } from 'next/navigation';
-import { useState, useEffect, useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { ArrowLeft, Thermometer, Activity, Clock, AlertTriangle } from 'lucide-react';
 import { fetchLatestTelemetry } from '@/lib/api';
 import { Telemetry } from '@/lib/types';
 import { getAlarmStatus } from '@/lib/alarms';
+import { HISTORY_LENGTH, STALE_AFTER_MS } from '@/lib/constants';
 import { TelemetryChart } from '@/components/TelemetryChart';
 import { FirmwareUploader } from '@/components/FirmwareUploader';
 import { StatusBadge } from '@/components/StatusBadge';
+
+const FIXED_LOCATIONS: Record<string, string> = {
+    'esp32-001': 'Lobby',
+    'esp32-002': 'Laboratory',
+};
 
 export default function DeviceDetailPage() {
     const params = useParams();
@@ -18,7 +24,7 @@ export default function DeviceDetailPage() {
 
     const [history, setHistory] = useState<Telemetry[]>([]);
 
-    const { data: allDevices, isLoading } = useQuery({
+    const { data: allDevices, dataUpdatedAt, isLoading } = useQuery({
         queryKey: ['latestTelemetry'],
         queryFn: fetchLatestTelemetry,
         refetchInterval: 2000,
@@ -26,47 +32,32 @@ export default function DeviceDetailPage() {
 
     const liveDeviceData = allDevices?.find(d => d.deviceId.toLowerCase() === deviceId.toLowerCase());
 
-    const FIXED_LOCATIONS: Record<string, string> = {
-        'esp32-001': 'Lobby',
-        'esp32-002': 'Laboratory'
-    };
-
-    // Memoize the device object construction to prevent object reference churn if data hasn't changed
     const device = useMemo(() => {
         if (!liveDeviceData) return null;
         return {
             ...liveDeviceData,
             location: FIXED_LOCATIONS[deviceId] || liveDeviceData.location || 'Unknown Area'
         };
-    }, [liveDeviceData, deviceId]); // Only recreate if `liveDeviceData` reference changes (React Query handles stability usually)
+    }, [liveDeviceData, deviceId]);
 
-    // Calculate Status (7s rule)
     const isOffline = useMemo(() => {
         if (!device || !device.timestamp) return true;
-        const diff = Date.now() - new Date(device.timestamp).getTime();
-        return diff > 15000;
-    }, [device]);
+        return dataUpdatedAt - new Date(device.timestamp).getTime() > STALE_AFTER_MS;
+    }, [device, dataUpdatedAt]);
 
-    // Loop Fix: Depend on timestamp string, not object reference.
-    useEffect(() => {
-        if (device && device.timestamp && !isOffline) {
-            setHistory(prev => {
-                const lastEntry = prev[prev.length - 1];
-                // Prevent duplicate entries if timestamp matches
-                if (lastEntry && lastEntry.timestamp === device.timestamp) return prev;
+    // Append each new reading to the trend buffer as it arrives. This adjusts
+    // state during render rather than in an effect, which is the supported way
+    // to derive state from changing props without a second render pass.
+    // See https://react.dev/reference/react/useState#storing-information-from-previous-renders
+    const [lastRecorded, setLastRecorded] = useState<string | null>(null);
+    if (device?.timestamp && !isOffline && device.timestamp !== lastRecorded) {
+        setLastRecorded(device.timestamp);
+        setHistory(prev => [...prev, device].slice(-HISTORY_LENGTH));
+    }
 
-                const newHistory = [...prev, device];
-                if (newHistory.length > 20) return newHistory.slice(newHistory.length - 20);
-                return newHistory;
-            });
-        }
-    }, [device?.timestamp, isOffline]); // dependency is the primitive timestamp string
-
-    // View Logic: If strictly offline/not found and we want to show "Offline" state:
     if ((!device && !isLoading) || isOffline) {
         const locationName = FIXED_LOCATIONS[deviceId] ? FIXED_LOCATIONS[deviceId].toUpperCase() : 'DEVICE';
 
-        // If we strictly have NO device data at all (first load):
         if (!device) {
             if (FIXED_LOCATIONS[deviceId]) {
                 return (
@@ -86,7 +77,6 @@ export default function DeviceDetailPage() {
         }
     }
 
-    // Safe alarm check
     const alarmStatus = device ? getAlarmStatus(device.location, device.tempC ?? 0) : 'normal';
 
     return (
@@ -114,7 +104,7 @@ export default function DeviceDetailPage() {
                         <Activity className="w-8 h-8 mr-4 opacity-50" />
                         <div>
                             <h3 className="text-xl font-bold tracking-tight">DEVICE OFFLINE</h3>
-                            <p className="text-sm opacity-80">Signal lost over 7 seconds ago.</p>
+                            <p className="text-sm opacity-80">No reading received recently.</p>
                         </div>
                     </div>
                 )}
@@ -189,7 +179,7 @@ export default function DeviceDetailPage() {
                             <div className="space-y-3">
                                 {[...history].reverse().slice(0, 6).map((h, i) => (
                                     <div key={i} className="flex items-center justify-between p-3 rounded-xl bg-neutral-900/50 hover:bg-neutral-800/50 transition-colors">
-                                        <span className="text-xs font-mono text-neutral-600">#{20 - i}</span>
+                                        <span className="text-xs font-mono text-neutral-600">#{history.length - i}</span>
                                         <div className="flex items-baseline space-x-1">
                                             <span className={`text-sm font-bold ${h.tempC >= 30 || (h.location === 'Laboratory' && h.tempC >= 5) ? 'text-red-500' : 'text-neutral-300'}`}>
                                                 {(h.tempC ?? 0).toFixed(1)}°

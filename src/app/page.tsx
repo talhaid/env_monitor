@@ -1,68 +1,49 @@
 'use client';
 
-import { useEffect } from 'react';
-
 import { useQuery } from '@tanstack/react-query';
 import { fetchLatestTelemetry } from '@/lib/api';
+import { Device } from '@/lib/types';
+import { STALE_AFTER_MS } from '@/lib/constants';
 import { DeviceCard } from '@/components/DeviceCard';
-import { Loader2 } from 'lucide-react';
+
+const FIXED_DEVICES = [
+  { deviceId: 'esp32-001', location: 'Lobby' },
+  { deviceId: 'esp32-002', location: 'Laboratory' },
+];
 
 export default function Home() {
-  const { data: latestData, isLoading, isError, error } = useQuery({
+  const { data: latestData, dataUpdatedAt, isError, error } = useQuery({
     queryKey: ['latestTelemetry'],
     queryFn: fetchLatestTelemetry,
     refetchInterval: 5000,
   });
 
+  const devices: Device[] = FIXED_DEVICES.map(fixed => {
+    const live = latestData?.find(
+      d => d.deviceId.toLowerCase().trim() === fixed.deviceId.toLowerCase().trim()
+    );
 
-
-  const FIXED_DEVICES = [
-    { deviceId: 'esp32-001', location: 'Lobby' },
-    { deviceId: 'esp32-002', location: 'Laboratory' },
-  ];
-
-  const devices = FIXED_DEVICES.map(fixed => {
-    // Case-insensitive match with trim
-    const live = latestData?.find(d => d.deviceId.toLowerCase().trim() === fixed.deviceId.toLowerCase().trim());
-
-    // Offline Logic: > 7 seconds from timestamp
-    let isOffline = true;
-    if (live && live.timestamp) {
-      const lastSeen = new Date(live.timestamp).getTime();
-      const now = Date.now();
-      const diff = now - lastSeen;
-      // If diff is less than 15000ms (15s), it is ONLINE.
-      // Relaxed from 7s to prevent flickering due to poll jitter or latency
-      if (diff < 15000) {
-        isOffline = false;
-      }
-    } else if (live) {
-      // If live exists but no timestamp? (API ensures it now), treat as fresh if just fetched?
-      // API sets it to 'now' if missing, so diff would be 0.
-      isOffline = false;
-    }
+    // A node is online while its last reading is newer than the stale
+    // threshold, measured against the moment we received the poll response.
+    // The threshold spans a few poll intervals so latency does not flicker it.
+    const lastSeen = live?.timestamp ? new Date(live.timestamp).getTime() : 0;
+    const isOffline = !live || dataUpdatedAt - lastSeen > STALE_AFTER_MS;
 
     if (live && !isOffline) {
-      // Force the nice location name AND include status 'online'
-      return { ...live, location: fixed.location, status: 'online' };
+      return { ...live, location: fixed.location, lastSeen, status: 'online', alarmStatus: 'normal' };
     }
 
-    // Fallback to offline state
-    // If we have stale live data, we might want to show it but greyed out?
-    // Requirement: "go offline... and there is not new one". Use offline style.
+    // Offline nodes render with zeroed readings rather than stale ones, so the
+    // card never shows a number that looks current.
     return {
       ...fixed,
-      // If we have stale data, render it but marked offline? Or zero it out?
-      // Previous code zeroed it out. Let's keep it zeroed for clean "OFFLINE" look or 
-      // preserve last known values? "Pressure display... removed". 
-      // Let's stick to safe defaults for offline.
-      tempC: live ? live.tempC : 0,
-      pressureHpa: live ? live.pressureHpa : 0,
-      fw: live ? live.fw : 'Unknown',
-      timestamp: live ? live.timestamp : undefined,
+      tempC: 0,
+      pressureHpa: 0,
+      fw: 'Unknown',
+      lastSeen,
       status: 'offline',
-      alarmStatus: 'normal'
-    } as any;
+      alarmStatus: 'normal',
+    };
   });
 
 

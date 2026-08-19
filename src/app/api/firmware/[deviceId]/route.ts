@@ -2,7 +2,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { writeFile, mkdir } from 'fs/promises';
 import path from 'path';
-import fs from 'fs';
 
 export async function POST(
     request: NextRequest,
@@ -30,28 +29,15 @@ export async function POST(
 
         const buffer = Buffer.from(await file.arrayBuffer());
 
-        // Target path configuration
-        // Production path: /root/env-monitor/firmware/
-        // Fallback (Local Dev): ./firmware/
-        let uploadDir = '/root/env-monitor/firmware/';
+        // Where the OTA server picks binaries up from. Set FIRMWARE_DIR in
+        // deployment; falls back to ./firmware for local development.
+        const uploadDir = process.env.FIRMWARE_DIR ?? path.join(process.cwd(), 'firmware');
 
-        // Check if production path exists/is writable, else fallback to local
-        try {
-            // minimal check: if we are not on linux root, this likely fails or doesn't exist
-            if (!fs.existsSync('/root/env-monitor')) {
-                uploadDir = path.join(process.cwd(), 'firmware');
-            }
-        } catch (e) {
-            uploadDir = path.join(process.cwd(), 'firmware');
-        }
-
-        // Ensure directory exists
         await mkdir(uploadDir, { recursive: true });
 
-        // Force filename to match the device ID or keep original?
-        // User scp example: scp esp32-002.bin ...
-        // Let's use the uploaded filename to be safe, but maybe sanitize it
-        const filename = file.name;
+        // The filename comes from the client, so strip any path segments before
+        // joining it to the upload directory.
+        const filename = path.basename(file.name);
         const filepath = path.join(uploadDir, filename);
 
         await writeFile(filepath, buffer);

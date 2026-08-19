@@ -1,8 +1,7 @@
 import { Telemetry } from '@/lib/types';
 import { getAlarmStatus } from '@/lib/alarms';
-import { StatusBadge } from './StatusBadge';
 import Link from 'next/link';
-import { Thermometer, Activity, Wifi } from 'lucide-react';
+import { Thermometer } from 'lucide-react';
 
 interface DeviceCardProps {
     device: Telemetry;

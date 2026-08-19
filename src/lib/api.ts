@@ -1,7 +1,7 @@
 import axios from 'axios';
 import { Telemetry, Config } from './types';
 
-const API_BASE_URL = 'http://165.227.69.142:3000';
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
 
 export const api = axios.create({
     baseURL: API_BASE_URL,
@@ -18,12 +18,13 @@ export const fetchLatestTelemetry = async (): Promise<Telemetry[]> => {
     data.forEach((item: Telemetry) => {
         if (!item || !item.deviceId) return;
 
-        const processedItem = {
+        // Keep the server's timestamp: staleness is measured against it, so
+        // overwriting it here would make every device look permanently online.
+        // Only stand in for it when the API omits it entirely.
+        uniqueDevices.set(item.deviceId, {
             ...item,
-            // FORCE client-side timestamp to prevent clock skew issues
-            timestamp: new Date().toISOString()
-        };
-        uniqueDevices.set(item.deviceId, processedItem);
+            timestamp: item.timestamp ?? new Date().toISOString(),
+        });
     });
 
     return Array.from(uniqueDevices.values());
